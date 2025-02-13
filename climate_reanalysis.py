@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# <a href="https://colab.research.google.com/github/god7i11a/pynb/blob/main/SST_anomaly.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
-
 # # Resources
 # # https://climatereanalyzer.org/clim/sst_daily/
 # # https://www.pyngl.ucar.edu/
@@ -121,8 +119,6 @@ def display_latest_year_data(ds):
     plt.title(f'latest year of data = {ds.last_year}')
     plt.savefig(f'{ds.name}_last_year.png')
 
-    return fig_last
-
 
 # # Colormaps
 # # https://colorcet.holoviz.org/
@@ -183,9 +179,7 @@ def construct_colormap(show_chart=False):
     cmap_names = [cname for ctype in cmap_types for cname in cmaps[ctype]]
 
     if show_chart:
-        cbarfig = _display_color_chart(cmaps, cmap_types)
-    else:
-        cbarfig = None
+        _display_color_chart(cmaps, cmap_types)
 
     w = widgets.Dropdown(
         options=cmap_names,
@@ -194,7 +188,7 @@ def construct_colormap(show_chart=False):
     )
 
     # display(w)
-    return w, cbarfig
+    return w
 
 
 # ## graph
@@ -276,7 +270,6 @@ def display_main_plot(ds, w):
 
     plt.savefig(f'{ds.name}-color.png')
 
-    return fig
 
 # # SST jumps
 
@@ -336,7 +329,6 @@ def display_jumps(ds, w):
 
     plt.savefig(f'{ds.name}-color-jumps.png')
 
-    return fig
 
 
 def display_as_one_curve(ds, w):
@@ -374,7 +366,6 @@ def display_as_one_curve(ds, w):
                  boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
     plt.savefig(f'{ds.name}-one-curve.png')
 
-    return fig_all_T
 
 
 # # Just checking my stuff against Climate Reanalyzer graph
@@ -415,12 +406,10 @@ def display_shifting_averages(ds):
     ax.set_title(ds.name)
     plt.savefig(f'{ds.name}-change-in-averages')
 
-    return fig
-
 
 if __name__ == '__main__':
     get_data(SST)
-    w, _ = construct_colormap(show_chart=True)
+    w = construct_colormap(show_chart=True)
     display_latest_year_data(SST)
     display_main_plot(SST, w)
     display_jumps(SST, w)
