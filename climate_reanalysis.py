@@ -25,31 +25,38 @@ plt.rcParams.update({
 })
 CID = None
 
-datasets = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
-                   'end_offset': -4,
-                   'mean_base': -2,
-                   'fileN': 'era5_world_t2_day.json',
-                   'sigma_caption_pos': [16.75, 16.5],
-                   'caption_height': 11.05,
-                   'data': None,
-                   'name': 'T2'
-                   },
-            'SST': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json_2clim',
-                    'end_offset': -3,
+datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
+                    'end_offset': -4,
                     'mean_base': -2,
-                    'fileN': 'oisst2.1_world2_sst_day.json',
-                    'sigma_caption_pos': [21.25, 21.2],
-                    'caption_height': 19.6,
+                    'fileN': 'era5_world_t2_day.json',
+                    'sigma_caption_pos': [16.75, 16.5],
+                    'caption_height': 11.05,
                     'data': None,
-                    'name': 'SST'
+                    'name': 'T2',
+                    'jump_years': {1976: 'D', 1977: 'x', 1978: 's', 1979: '^', 1980: 'D', 1981: 'x', 1982: 's',
+                                   1983: 's', 2022: '*', 2023: 'D', 2024: 'p', 2025: 'v'},
+                    'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v'}
                     },
-            'SST_old': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json',
-                        'end_offset': -4,
-                        'fileN': 'oisst2.1_world2_sst_day.json',
-                        'caption_height': 19.6,
-                        'data': None
-                        }
-            }
+             'SST': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json_2clim',
+                     'end_offset': -3,
+                     'mean_base': -2,
+                     'fileN': 'oisst2.1_world2_sst_day.json',
+                     'sigma_caption_pos': [21.25, 21.2],
+                     'caption_height': 19.6,
+                     'data': None,
+                     'name': 'SST',
+                     'jump_years': {1996: 'D', 1997: 'x', 1998: 's', 1999: '^',
+                                    2022: 'D', 2023: 'x', 2024: 's', 2025: 's', 2017: '*', 2014: 'D'},
+                     'hl_years': {2009: 'o', 2010: 's', 2011: '^', 2012: 'v', 2013: '*', 2014: 'D', 2015: '<', 2016: '>',
+                                  2023: 'x', 2024: 'D', 2025: 'v'}
+                     },
+             'SST_old': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json',
+                         'end_offset': -4,
+                         'fileN': 'oisst2.1_world2_sst_day.json',
+                         'caption_height': 19.6,
+                         'data': None
+                         }
+             }
 
 
 class Dataset:
@@ -62,9 +69,9 @@ class Dataset:
             setattr(self, kw, val)
 
 
-T2 = Dataset(**datasets['T2'])
-SST = Dataset(**datasets['SST'])
-SST_old = Dataset(**datasets['SST_old'])
+T2 = Dataset(**datasetsD['T2'])
+SST = Dataset(**datasetsD['SST'])
+SST_old = Dataset(**datasetsD['SST_old'])
 
 # # get the latest data
 #
@@ -132,7 +139,7 @@ def _display_color_chart(cmaps, cmap_types):
 
     ncols = len(cmap_types)
     nrows = max([len(arr) for arr in cmaps.values()])
-    cbarfig, axsL = plt.subplots(nrows=nrows, ncols=ncols, sharey=True, sharex=True, figsize=(16, 16), num=8, clear=True)
+    cbarfig, axsL = plt.subplots(nrows=nrows, ncols=ncols, sharey=True, sharex=True, figsize=(16, 16), num=20, clear=True)
     cbarfig.subplots_adjust(hspace=0.35, wspace=0.05)
 
     for axrow in axsL:
@@ -151,8 +158,6 @@ def _display_color_chart(cmaps, cmap_types):
             ax.set_axis_on()
             ax.set_xticks([])
             ax.set_yticks([])
-
-    return cbarfig
 
 
 def construct_colormap(show_chart=False):
@@ -187,7 +192,6 @@ def construct_colormap(show_chart=False):
         description='ColorMap Choice:',
     )
 
-    # display(w)
     return w
 
 
@@ -230,7 +234,6 @@ def display_main_plot(ds, w):
 
     _skip = 10
     ms = 5
-    hl_years = {2009: 'o', 2010: 's', 2011: '^', 2012: 'v', 2013: '*', 2014: 'D', 2015: '<', 2016: '>', 2023: 'x', 2024: 'D'}
 
     labels = None
     for i, _year in enumerate(ds.yearL):
@@ -239,10 +242,10 @@ def display_main_plot(ds, w):
 
         ax.plot(cdf.index, cdf.loc[:, f'{_year}'], c=cmap(i), lw=1, label=labels, picker=PICK, pickradius=5)
         if ACCENTS:
-            if _year in hl_years.keys():
+            if _year in ds.hl_years.keys():
                 day_num = cdf.index.to_list()[0::_skip]
                 data = cdf[f'{_year}'].iloc[0::_skip]
-                ax.plot(day_num, data, hl_years[_year], c=cmap(i), ms=ms, label=f'{_year}')
+                ax.plot(day_num, data, ds.hl_years[_year], c=cmap(i), ms=ms, label=f'{_year}')
 
     norm = colors.Normalize(vmin=int(ds.first_year), vmax=ds.yearL[-1])
     ds.sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -276,7 +279,6 @@ def display_main_plot(ds, w):
 
 def display_jumps(ds, w):
     SHOWSIG = True
-    ACCENTS = True
 
     cdf = ds.data
 
@@ -298,16 +300,12 @@ def display_jumps(ds, w):
     _skip = 10
     ms = 5
 
-    hl_years = {1996: 'D', 1997: 'x', 1998: 's', 1999: '^', 2022: 'D', 2023: 'x', 2024: 's', 2025: 's', 2017: '*', 2014: 'D'}
-    year_choice = hl_years.keys()
-
     for i, _year in enumerate(ds.yearL):
-        if _year in year_choice:
+        if _year in ds.jump_years.keys():
             ax.plot(cdf.index, cdf.loc[:, f'{_year}'], c=cmap(i), lw=1)
-        if _year in hl_years.keys():
             day_num = cdf.index.to_list()[0::_skip]
             data = cdf[f'{_year}'].iloc[0::_skip]
-            ax.plot(day_num, data, hl_years[_year], c=cmap(i), ms=ms, label=f'{_year}')
+            ax.plot(day_num, data, ds.jump_years[_year], c=cmap(i), ms=ms, label=f'{_year}')
 
     ax.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
     ax.set_title(f'{ds.name} jumps of 1997 and 2023', fontsize='xx-large')
@@ -328,7 +326,6 @@ def display_jumps(ds, w):
         ax.set_xlabel(r'day \#', fontsize='xx-large')
 
     plt.savefig(f'{ds.name}-color-jumps.png')
-
 
 
 def display_as_one_curve(ds, w):
@@ -365,7 +362,6 @@ def display_as_one_curve(ds, w):
     plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
                  boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
     plt.savefig(f'{ds.name}-one-curve.png')
-
 
 
 # # Just checking my stuff against Climate Reanalyzer graph
@@ -407,12 +403,17 @@ def display_shifting_averages(ds):
     plt.savefig(f'{ds.name}-change-in-averages')
 
 
-if __name__ == '__main__':
-    get_data(SST)
+def make_all_plots(ds):
+    get_data(ds)
     w = construct_colormap(show_chart=True)
-    display_latest_year_data(SST)
-    display_main_plot(SST, w)
-    display_jumps(SST, w)
-    display_as_one_curve(SST, w)
-    display_shifting_averages(SST)
+    display_latest_year_data(ds)
+    display_main_plot(ds, w)
+    display_jumps(ds, w)
+    display_as_one_curve(ds, w)
+    display_shifting_averages(ds)
+
+
+if __name__ == '__main__':
+    # make_all_plots(SST)
+    make_all_plots(T2)
     plt.show()
