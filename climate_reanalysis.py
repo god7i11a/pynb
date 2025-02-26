@@ -211,8 +211,8 @@ def construct_colormap(show_chart=False):
 
 
 # ## graph
-isDrawn1 = 0
-isDrawn0 = 0
+# isDrawn1 = 0
+# isDrawn0 = 0
 
 
 def display_main_plot(ds, w):
@@ -291,25 +291,12 @@ def display_main_plot(ds, w):
     else:
         ax.set_xlabel(r'day \#', fontsize='xx-large')
 
-    def on_draw1(event):
-        global isDrawn1
-        isDrawn1 = isDrawn1+1
-        if isDrawn1 == 1:
-            voff = posD['sigma_caption_voffset']
-            bbox = _legend.get_window_extent().transformed(ax.transData.inverted())
-            if 0:
-                print(bbox, f'{isDrawn1=}')
-            ax.text(bbox.x0, bbox.y0-voff, textStr, fontsize='medium')
-
-    fig.canvas.mpl_connect('draw_event', on_draw1)
-    fig.canvas.draw()
+    LegendHandler(fig, ax, _legend, posD, (textStr, ))
     fig.savefig(f'{ds.name}-color.pdf', dpi=300, bbox_inches='tight')
     fig.savefig(f'{ds.name}-color.png', dpi=300, bbox_inches='tight')
 
 
-# # SST jumps
-
-
+# # SST/T2 jumps
 def display_jumps(ds, w):
     SHOWSIG = True
 
@@ -360,21 +347,34 @@ def display_jumps(ds, w):
     textStr0 = rf'$\sigma = \sigma({ds.mean_baseL[0]}-{ds.mean_baseL[1]})$'
     textStr1 = r'$\sigma_{final} = \sigma(2011-2024)$'
 
-    def on_draw0(event):
-        global isDrawn0
-        isDrawn0 = isDrawn0+1
-        if isDrawn0 == 1:
-            bbox = _legend.get_window_extent().transformed(ax.transData.inverted())
-            if 0:
-                print(bbox, f'{isDrawn0=}')
-            voff = posD['sigma_caption_voffset']
-            ax.text(bbox.x0, bbox.y0-voff, textStr0, fontsize='medium')
-            ax.text(bbox.x0, bbox.y0-2*voff, textStr1, fontsize='medium')
+    LegendHandler(fig, ax, _legend, posD, (textStr0, textStr1))
 
-    fig.canvas.mpl_connect('draw_event', on_draw0)
-    fig.canvas.draw()
     fig.savefig(f'{ds.name}-color-jumps.pdf', bbox_inches='tight')
     fig.savefig(f'{ds.name}-color-jumps.png', bbox_inches='tight')
+
+
+class LegendHandler:
+    drawn = 0
+
+    def __init__(self, fig, ax, legend, posD, textL):
+        self.legend = legend
+        self.ax = ax
+        self.fig = fig
+        self.posD = posD
+        self.drawn = 0
+        self.textL = textL
+        fig.canvas.mpl_connect('draw_event', self.on_draw)
+        fig.canvas.draw()
+
+    def on_draw(self, event):
+        self.drawn = self.drawn+1
+        if self.drawn == 1:
+            bbox = self.legend.get_window_extent().transformed(self.ax.transData.inverted())
+            if 0:
+                print(bbox, f'{self.drawn=}')
+            voff = self.posD['sigma_caption_voffset']
+            for i, textStr in enumerate(self.textL):
+                self.ax.text(bbox.x0, bbox.y0-(i+1)*voff, textStr, fontsize='medium')
 
 
 def display_as_one_curve(ds, w, rolling_only=False):
@@ -473,7 +473,7 @@ def make_all_plots(ds):
 
 
 if __name__ == '__main__':
-    _ds = SST
+    _ds = T2
     if 1:
         update_data(_ds)
         make_all_plots(_ds)
