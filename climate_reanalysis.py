@@ -15,38 +15,46 @@
 import datetime
 import ipywidgets as widgets
 from numpy import array, linspace, vstack, arange
-from pandas import DataFrame, concat, read_json
+from pandas import DataFrame, concat, read_json, read_excel
 from matplotlib import pyplot as plt, colors
 
+# "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb} \usepackage[utf8]{inputenc}"
+plt.rcParams.update({"text.usetex": True})
 
-plt.rcParams.update({
-    "text.usetex": True,
-    # "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb} \usepackage[utf8]{inputenc}"
-})
 CID = None
 
 datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                     'end_offset': -4,
                     'mean_base': -2,
                     'fileN': 'era5_world_t2_day.json',
-                    'sigma_caption_pos': [16.75, 16.5],
-                    'caption_height': 11.05,
                     'data': None,
                     'name': 'T2',
+                    'pos': {'loc': 'upper left', 'ncols': 3,
+                            'sigma_caption_voffset': .125,
+                            'caption_height': 11.1, 'ylim': [11, 18]},
+                    'pos_jump': {'loc': 'upper left', 'ncols': 4,
+                                 'sigma_caption_voffset': .125,
+                                 'caption_height': 11.15, 'ylim': [11, 18]},
                     'jump_years': {1976: 'D', 1977: 'x', 1978: 's', 1979: '^', 1980: 'D', 1981: 'x', 1982: 's',
                                    1983: 's', 2022: '*', 2023: 'D', 2024: 'p', 2025: 'v'},
+                    'jump_title': 'T2 jumps of 1976-1983 and 2022-2025',
                     'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v'}
                     },
              'SST': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json_2clim',
                      'end_offset': -3,
                      'mean_base': -2,
                      'fileN': 'oisst2.1_world2_sst_day.json',
-                     'sigma_caption_pos': [21.25, 21.2],
-                     'caption_height': 19.6,
                      'data': None,
                      'name': 'SST',
+                     'pos': {'loc': 'upper right', 'ncols': 4,
+                             'sigma_caption_voffset': .05,
+                             'caption_height': 19.54, 'ylim': [19.5, 21.5]},
+                     'pos_jump': {'loc': 'upper right', 'ncols': 3,
+                                  'sigma_caption_voffset': .05,
+                                  'caption_height': 19.54, 'ylim': [19.5, 21.5]},
                      'jump_years': {1996: 'D', 1997: 'x', 1998: 's', 1999: '^',
-                                    2022: 'D', 2023: 'x', 2024: 's', 2025: 's', 2017: '*', 2014: 'D'},
+                                    2022: '*', 2023: 'p', 2024: 'v', 2025: '<'},
+                     'jump_title': 'SST jumps of 1996-1999 and 2022-2025',
                      'hl_years': {2009: 'o', 2010: 's', 2011: '^', 2012: 'v', 2013: '*', 2014: 'D', 2015: '<', 2016: '>',
                                   2023: 'x', 2024: 'D', 2025: 'v'}
                      },
@@ -57,6 +65,10 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                          'data': None
                          }
              }
+
+markersL = ('1', '2', '3', '4', '+', 'x', '.', 'o', 'v', '<', '>',
+            '8', 's', 'p', '*', 'h', 'H', 'd', 'D', 'P', 'X',
+            4, 5, 6, 7, 8, 9, 10, 11)
 
 
 class Dataset:
@@ -79,26 +91,29 @@ SST_old = Dataset(**datasetsD['SST_old'])
 # # gridded data https://www.ncei.noaa.gov/data/sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/
 
 
-def get_data(ds):
-
+def update_data(ds):
     path = f"{ds.URL}/{ds.fileN}"
     df = read_json(path_or_buf=path)
     df.set_index("name", inplace=True)
     df = DataFrame(df["data"].to_list(), columns=list(range(1, 367)), index=df.index)
-    print(df.index.to_list())
+    df.to_excel(f'{ds.name}_raw_data.xlsx')
+
+
+def get_data(ds):
+    df = read_excel(f'{ds.name}_raw_data.xlsx')
+    df.set_index('name', inplace=True, drop=True)
     ds.last_year = df.index.to_list()[ds.end_offset]
     ds.first_year = df.index.to_list()[0]
     ds.day_of_year = df.loc[ds.last_year, :].dropna().index.to_list()[-1]
-    print(f'{ds.day_of_year=}')
     ds.last_date = (datetime.datetime(int(ds.last_year), 1, 1) + datetime.timedelta(ds.day_of_year - 1)).strftime('%m/%d/%Y')
+    ds.yearL = range(int(ds.first_year), int(ds.last_year)+1)
+    ds.end_data_period = df.index.to_list()[ds.end_offset+1:]
+    ds.mean_baseL = df.index.to_list()[ds.mean_base].split('-')
+
+    print(f'{ds.day_of_year=}')
     print(f'latest data point is {ds.last_date}')
     print(f'last year = {ds.last_year}')
     print(f'first year = {ds.first_year}')
-    ds.yearL = range(int(ds.first_year), int(ds.last_year)+1)
-
-    ds.end_data_period = df.index.to_list()[ds.end_offset+1:]
-    ds.mean_baseL = df.index.to_list()[ds.mean_base].split('-')
-    df.to_excel(f'{ds.name}_raw_data.xlsx')
 
     # # compute mean and standard deviations and display raw data
 
@@ -118,7 +133,7 @@ def display_latest_year_data(ds):
 
     cdf = ds.data
 
-    fig_last, ax_last = plt.subplots(1, 1, figsize=(10, 6), clear=True, num=1)
+    _, ax_last = plt.subplots(1, 1, figsize=(10, 6), clear=True, num=1)
     ax_last.plot(array(cdf.index.to_list()), cdf[f'{ds.yearL[-1]}'], lw=1)
     plt.xlim([0, ds.day_of_year])
     plt.xlabel('day_of_year')
@@ -196,6 +211,9 @@ def construct_colormap(show_chart=False):
 
 
 # ## graph
+isDrawn1 = 0
+isDrawn0 = 0
+
 
 def display_main_plot(ds, w):
     global PICK, CID
@@ -215,9 +233,9 @@ def display_main_plot(ds, w):
 
     cdf = ds.data
 
-    if SHOWSIG:
-        fig = plt.figure(figsize=(16, 14), clear=True, num=2, layout='constrained')
-        (ax, ax1) = fig.subplots(2, 1, sharex=True, height_ratios=[.75, .25])
+    if SHOWSIG:    # 15,11
+        fig = plt.figure(figsize=(15, 11), clear=True, num=2, layout='constrained')
+        (ax, ax1) = fig.subplots(2, 1, sharex=True, height_ratios=[.8, .2])
     else:
         fig, ax = plt.subplots(1, 1, figsize=(16, 16), num=2, clear=True)
 
@@ -253,12 +271,16 @@ def display_main_plot(ds, w):
     plt.colorbar(ds.sm, ax=ax, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
                  boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
 
+    posD = ds.pos
     ax.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
     ax.set_title(f'{ds.first_year}-{ds.last_year} daily {ds.name}', fontsize='xx-large')
-    ax.text(275, ds.caption_height,  f'\\it{{data current to {ds.last_date}}}', fontsize='xx-large')
+    ax.text(275, posD['caption_height'],  f'\\it{{data current to {ds.last_date}}}', fontsize='xx-large')
     ax.set_xlim(0, 365)
+    ax.set_ylim(*posD['ylim'])
     if not PICK:
-        ax.legend(ncols=4)
+        _legend = ax.legend(ncols=posD['ncols'], loc=posD['loc'])
+
+    textStr = rf'$\sigma = \sigma({ds.mean_baseL[0]}-{ds.mean_baseL[1]})$'
 
     if SHOWSIG:
         ax1.plot(cdf.index, cdf['std'], 'b.', ms=4)
@@ -269,9 +291,20 @@ def display_main_plot(ds, w):
     else:
         ax.set_xlabel(r'day \#', fontsize='xx-large')
 
-    ax.text(272, ds.sigma_caption_pos[0], rf'$\sigma = \sigma({ds.mean_baseL[0]}-{ds.mean_baseL[1]})$', fontsize='medium')
+    def on_draw1(event):
+        global isDrawn1
+        isDrawn1 = isDrawn1+1
+        if isDrawn1 == 1:
+            voff = posD['sigma_caption_voffset']
+            bbox = _legend.get_window_extent().transformed(ax.transData.inverted())
+            if 0:
+                print(bbox, f'{isDrawn1=}')
+            ax.text(bbox.x0, bbox.y0-voff, textStr, fontsize='medium')
 
-    plt.savefig(f'{ds.name}-color.png')
+    fig.canvas.mpl_connect('draw_event', on_draw1)
+    fig.canvas.draw()
+    fig.savefig(f'{ds.name}-color.pdf', dpi=300, bbox_inches='tight')
+    fig.savefig(f'{ds.name}-color.png', dpi=300, bbox_inches='tight')
 
 
 # # SST jumps
@@ -283,8 +316,8 @@ def display_jumps(ds, w):
     cdf = ds.data
 
     if SHOWSIG:
-        fig = plt.figure(figsize=(16, 14), clear=True, num=3, layout='constrained')
-        (ax, ax1) = fig.subplots(2, 1, sharex=True, height_ratios=[.75, .25])
+        fig = plt.figure(figsize=(15, 11), clear=True, num=3, layout='constrained')
+        (ax, ax1) = fig.subplots(2, 1, sharex=True, height_ratios=[.8, .2])
     else:
         fig, ax = plt.subplots(1, 1, figsize=(16, 16), num=3, clear=True)
 
@@ -307,13 +340,13 @@ def display_jumps(ds, w):
             data = cdf[f'{_year}'].iloc[0::_skip]
             ax.plot(day_num, data, ds.jump_years[_year], c=cmap(i), ms=ms, label=f'{_year}')
 
+    posD = ds.pos_jump
     ax.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
-    ax.set_title(f'{ds.name} jumps of 1997 and 2023', fontsize='xx-large')
-    ax.text(275, ds.caption_height,  f'\\it{{data current to {ds.last_date}}}', fontsize='xx-large')
+    ax.set_title(ds.jump_title, fontsize='xx-large')
+    ax.text(275, posD['caption_height'],  f'\\it{{data current to {ds.last_date}}}', fontsize='xx-large')
     ax.set_xlim(0, 365)
-    ax.legend(ncols=3)
-    ax.text(272, ds.sigma_caption_pos[0], r'$\sigma_{final} = \sigma(2011-2024)$', fontsize='medium')
-    ax.text(272, ds.sigma_caption_pos[1], rf'$\sigma = \sigma({ds.mean_baseL[0]}-{ds.mean_baseL[1]})$', fontsize='medium')
+    ax.set_ylim(*posD['ylim'])
+    _legend = ax.legend(ncols=posD['ncols'], loc=posD['loc'])
 
     if SHOWSIG:
         ax1.plot(cdf.index, cdf['std'], 'r', ms=4)
@@ -321,25 +354,45 @@ def display_jumps(ds, w):
         ax1.set_ylabel(r'$\sigma\ \  (^{\circ} C)$', fontsize='xx-large')
         ax1.set_xlabel(r'day \#', fontsize='xx-large')
         ax1.set_title(r'daily $\sigma$', fontsize='xx-large')
-        # plt.tight_layout()
     else:
         ax.set_xlabel(r'day \#', fontsize='xx-large')
 
-    plt.savefig(f'{ds.name}-color-jumps.png')
+    textStr0 = rf'$\sigma = \sigma({ds.mean_baseL[0]}-{ds.mean_baseL[1]})$'
+    textStr1 = r'$\sigma_{final} = \sigma(2011-2024)$'
+
+    def on_draw0(event):
+        global isDrawn0
+        isDrawn0 = isDrawn0+1
+        if isDrawn0 == 1:
+            bbox = _legend.get_window_extent().transformed(ax.transData.inverted())
+            if 0:
+                print(bbox, f'{isDrawn0=}')
+            voff = posD['sigma_caption_voffset']
+            ax.text(bbox.x0, bbox.y0-voff, textStr0, fontsize='medium')
+            ax.text(bbox.x0, bbox.y0-2*voff, textStr1, fontsize='medium')
+
+    fig.canvas.mpl_connect('draw_event', on_draw0)
+    fig.canvas.draw()
+    fig.savefig(f'{ds.name}-color-jumps.pdf', bbox_inches='tight')
+    fig.savefig(f'{ds.name}-color-jumps.png', bbox_inches='tight')
 
 
-def display_as_one_curve(ds, w):
-    fig_all_T, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=4)
+def display_as_one_curve(ds, w, rolling_only=False):
+    if not rolling_only:
+        fig_all_T, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=4)
+    else:
+        fig_all_T, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=5)
     num_colors = len(ds.yearL)
     cmap = plt.get_cmap(w.value, num_colors)
     cdf = ds.data
 
-    for i, _year in enumerate(ds.yearL):
-        if i == 0:
-            label = f'daily {ds.name} data'
-        else:
-            label = None
-        ax_all_T.plot(array(cdf.index.to_list())/365.+i+int(ds.first_year), cdf[f'{_year}'], '-', c=cmap(i), ms=1, lw=1, label=label)
+    if not rolling_only:
+        for i, _year in enumerate(ds.yearL):
+            if i == 0:
+                label = f'daily {ds.name} data'
+            else:
+                label = None
+            ax_all_T.plot(array(cdf.index.to_list())/365.+i+int(ds.first_year), cdf[f'{_year}'], '-', c=cmap(i), ms=1, lw=1, label=label)
 
     onedf = DataFrame(cdf[f'{ds.yearL[0]}'].to_list())
     for i, _year in enumerate(ds.yearL[1:]):
@@ -352,16 +405,21 @@ def display_as_one_curve(ds, w):
         min_periods = window_length-num_year_roll
         lab = f'rolling {num_year_roll}-year average'
         ax_all_T.plot(array(onedf.index.to_list())/365.+int(ds.first_year),
-                      onedf[0].rolling(window=window_length, center=center_window, min_periods=min_periods).mean(), color=_color, ms=1, label=lab)
+                      onedf[0].rolling(window=window_length,
+                                       center=center_window,
+                                       min_periods=min_periods).mean(),
+                      color=_color, ms=1, label=lab)
     title = 'centered' if center_window else 'right_aligned'
     title = title + ' rolling window'
     plt.title(title)
     ax_all_T.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
     plt.legend(numpoints=5)
 
-    plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
-                 boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
-    plt.savefig(f'{ds.name}-one-curve.png')
+    if not rolling_only:
+        plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
+                     boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
+    fN = f'{ds.name}-one-curve-rolling-only.png' if rolling_only else f'{ds.name}-one-curve.png'
+    plt.savefig(fN)
 
 
 # # Just checking my stuff against Climate Reanalyzer graph
@@ -370,7 +428,7 @@ def display_shifting_averages(ds):
     markerL = ('g>', 'k<', 'c^')
     cdf = ds.data
 
-    fig, ax = plt.subplots(1, 1, figsize=(16, 8), num=5, clear=True)
+    fig, ax = plt.subplots(1, 1, figsize=(16, 8), num=6, clear=True)
 
     cdf['3'] = cdf.loc[:, '2001':'2020'].mean(axis=1, skipna=True)
     cdf['4'] = cdf.loc[:, '2011':'2025'].mean(axis=1, skipna=True)
@@ -410,10 +468,14 @@ def make_all_plots(ds):
     display_main_plot(ds, w)
     display_jumps(ds, w)
     display_as_one_curve(ds, w)
+    display_as_one_curve(ds, w, rolling_only=True)
     display_shifting_averages(ds)
 
 
 if __name__ == '__main__':
-    # make_all_plots(SST)
-    make_all_plots(T2)
+    _ds = SST
+    if 1:
+        update_data(_ds)
+        make_all_plots(_ds)
+
     plt.show()
