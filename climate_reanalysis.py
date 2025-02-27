@@ -13,6 +13,7 @@
 # ## explore other ways of quantifying variations besides daily distribution around the 20 year mean.
 
 import datetime
+import gc
 import ipywidgets as widgets
 from numpy import array, linspace, vstack, arange
 from pandas import DataFrame, concat, read_json, read_excel
@@ -30,15 +31,16 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                     'data': None,
                     'name': 'T2',
                     'pos': {'loc': 'upper left', 'ncols': 3,
-                            'sigma_caption_voffset': .125,
+                            'sigma_caption_voffset': .15,
                             'caption_height': 11.1, 'ylim': [11, 18]},
                     'pos_jump': {'loc': 'upper left', 'ncols': 4,
-                                 'sigma_caption_voffset': .125,
+                                 'sigma_caption_voffset': .15,
                                  'caption_height': 11.15, 'ylim': [11, 18]},
                     'jump_years': {1976: 'D', 1977: 'x', 1978: 's', 1979: '^', 1980: 'D', 1981: 'x', 1982: 's',
                                    1983: 's', 2022: '*', 2023: 'D', 2024: 'p', 2025: 'v'},
                     'jump_title': 'T2 jumps of 1976-1983 and 2022-2025',
-                    'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v'}
+                    'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v'},
+                    'fig_start_num': 0
                     },
              'SST': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json_2clim',
                      'end_offset': -3,
@@ -56,7 +58,8 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                                     2022: '*', 2023: 'p', 2024: 'v', 2025: '<'},
                      'jump_title': 'SST jumps of 1996-1999 and 2022-2025',
                      'hl_years': {2009: 'o', 2010: 's', 2011: '^', 2012: 'v', 2013: '*', 2014: 'D', 2015: '<', 2016: '>',
-                                  2023: 'x', 2024: 'D', 2025: 'v'}
+                                  2023: 'x', 2024: 'D', 2025: 'v'},
+                     'fig_start_num': 6
                      },
              'SST_old': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json',
                          'end_offset': -4,
@@ -65,10 +68,6 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                          'data': None
                          }
              }
-
-markersL = ('1', '2', '3', '4', '+', 'x', '.', 'o', 'v', '<', '>',
-            '8', 's', 'p', '*', 'h', 'H', 'd', 'D', 'P', 'X',
-            4, 5, 6, 7, 8, 9, 10, 11)
 
 
 class Dataset:
@@ -85,9 +84,13 @@ T2 = Dataset(**datasetsD['T2'])
 SST = Dataset(**datasetsD['SST'])
 SST_old = Dataset(**datasetsD['SST_old'])
 
+markersL = ('1', '2', '3', '4', '+', 'x', '.', 'o', 'v', '<', '>',
+            '8', 's', 'p', '*', 'h', 'H', 'd', 'D', 'P', 'X',
+            4, 5, 6, 7, 8, 9, 10, 11)
+
+num_figs_per_ds = 6
+
 # # get the latest data
-#
-# # global average   https://climatereanalyzer.org/clim/t2_daily/json/era5_world_t2_day.json
 # # gridded data https://www.ncei.noaa.gov/data/sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/
 
 
@@ -116,7 +119,6 @@ def get_data(ds):
     print(f'first year = {ds.first_year}')
 
     # # compute mean and standard deviations and display raw data
-
     cdf = df.T.loc[:, ds.first_year:]
     cdf['mean'] = cdf.loc[:, ds.mean_baseL[0]:ds.mean_baseL[1]].mean(axis=1, skipna=True)
     cdf['std'] = cdf.loc[:, ds.mean_baseL[0]:ds.mean_baseL[1]].std(axis=1, skipna=True)
@@ -146,6 +148,9 @@ def display_latest_year_data(ds):
 # # https://colorcet.holoviz.org/
 # # https://cmasher.readthedocs.io/user/usage.html#accessing-colormaps
 def _display_color_chart(cmaps, cmap_types):
+    if 20 in plt.get_fignums():
+        print('Colormap already displayed')
+        return
     # ## color schemes
     gradient = linspace(0, 1, 256)
     gradient = vstack((gradient, gradient))
@@ -210,11 +215,6 @@ def construct_colormap(show_chart=False):
     return w
 
 
-# ## graph
-# isDrawn1 = 0
-# isDrawn0 = 0
-
-
 def display_main_plot(ds, w):
     global PICK, CID
     SHOWSIG = True
@@ -268,9 +268,9 @@ def display_main_plot(ds, w):
     norm = colors.Normalize(vmin=int(ds.first_year), vmax=ds.yearL[-1])
     ds.sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     # check that the color chosen in is the middle of the color segment
-    plt.colorbar(ds.sm, ax=ax, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
-                 boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
-
+    cbar = plt.colorbar(ds.sm, ax=ax, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
+                        boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
+    cbar.ax.tick_params(labelsize=6)
     posD = ds.pos
     ax.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
     ax.set_title(f'{ds.first_year}-{ds.last_year} daily {ds.name}', fontsize='xx-large')
@@ -291,7 +291,8 @@ def display_main_plot(ds, w):
     else:
         ax.set_xlabel(r'day \#', fontsize='xx-large')
 
-    LegendHandler(fig, ax, _legend, posD, (textStr, ))
+    if not PICK:
+        LegendHandler(fig, ax, _legend, posD, (textStr, ))
     fig.savefig(f'{ds.name}-color.pdf', dpi=300, bbox_inches='tight')
     fig.savefig(f'{ds.name}-color.png', dpi=300, bbox_inches='tight')
 
@@ -416,8 +417,9 @@ def display_as_one_curve(ds, w, rolling_only=False):
     plt.legend(numpoints=5)
 
     if not rolling_only:
-        plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
-                     boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
+        cbar = plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
+                            boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
+        cbar.ax.tick_params(labelsize=6)
     fN = f'{ds.name}-one-curve-rolling-only.png' if rolling_only else f'{ds.name}-one-curve.png'
     plt.savefig(fN)
 
@@ -470,12 +472,18 @@ def make_all_plots(ds):
     display_as_one_curve(ds, w)
     display_as_one_curve(ds, w, rolling_only=True)
     display_shifting_averages(ds)
+    plt.show(block=False)
+    input('Continue with any key: ')
+    for num in plt.get_fignums():
+        if num == 20:
+            continue
+        plt.figure(num).clear()
+        plt.close(num)
+        gc.collect()
+        plt.pause(0.5)
 
 
 if __name__ == '__main__':
-    _ds = T2
-    if 1:
+    for _ds in (T2, SST):
         update_data(_ds)
         make_all_plots(_ds)
-
-    plt.show()
