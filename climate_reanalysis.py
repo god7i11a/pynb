@@ -15,20 +15,27 @@
 import datetime
 import gc
 import ipywidgets as widgets
-from numpy import array, linspace, vstack, arange
-from pandas import DataFrame, concat, read_json, read_excel
+from numpy import array, linspace, vstack, arange, isnan
+from pandas import DataFrame, concat, read_json, read_excel, notna
 from matplotlib import pyplot as plt, colors
+from matplotlib.legend_handler import HandlerPathCollection, HandlerLine2D
 
 # "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb} \usepackage[utf8]{inputenc}"
 plt.rcParams.update({"text.usetex": True})
 
 CID = None
 
+# to be created later
+dsL = []
+T2 = DataFrame([])
+SST = T2
+
 datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                     'end_offset': -4,
                     'mean_base': -2,
                     'fileN': 'era5_world_t2_day.json',
                     'data': None,
+                    'rolling_data': None,
                     'name': 'T2',
                     'pos': {'loc': 'upper left', 'ncols': 3,
                             'sigma_caption_voffset': .15,
@@ -39,7 +46,7 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                     'jump_years': {1976: 'D', 1977: 'x', 1978: 's', 1979: '^', 1980: 'D', 1981: 'x', 1982: 's',
                                    1983: 's', 2022: '*', 2023: 'D', 2024: 'p', 2025: 'v'},
                     'jump_title': 'T2 jumps of 1976-1983 and 2022-2025',
-                    'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v'},
+                    'hl_years': {2022: 's', 2023: 'x', 2024: 'D', 2025: 'v', 2026: '^'},
                     'fig_start_num': 0
                     },
              'SST': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json_2clim',
@@ -47,6 +54,7 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                      'mean_base': -2,
                      'fileN': 'oisst2.1_world2_sst_day.json',
                      'data': None,
+                     'rolling_data': None,
                      'name': 'SST',
                      'pos': {'loc': 'upper right', 'ncols': 4,
                              'sigma_caption_voffset': .05,
@@ -58,8 +66,8 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
                                     2022: '*', 2023: 'p', 2024: 'v', 2025: '<'},
                      'jump_title': 'SST jumps of 1996-1999 and 2022-2025',
                      'hl_years': {2009: 'o', 2010: 's', 2011: '^', 2012: 'v', 2013: '*', 2014: 'D', 2015: '<', 2016: '>',
-                                  2023: 'x', 2024: 'D', 2025: 'v'},
-                     'fig_start_num': 6
+                                  2023: 'x', 2024: 'D', 2025: 'v', 2026: 'P'},
+                     'fig_start_num': 8
                      },
              'SST_old': {'URL': 'https://climatereanalyzer.org/clim/sst_daily/json',
                          'end_offset': -4,
@@ -71,64 +79,95 @@ datasetsD = {'T2': {'URL': 'https://climatereanalyzer.org/clim/t2_daily/json',
 
 
 class Dataset:
+    yearL = []
+    data = []
+    URL = ''
+    fileN = ''
+    name = ''
+    end_offset = -1
+    mean_base = 0
+    cdf = DataFrame([])
+    has_preliminary_data = False
 
-    def __init__(self, **kwD):
-        self.init(kwD)
-
-    def init(self, kwD):
+    def __init__(self,  **kwD):
         for kw, val in kwD.items():
             setattr(self, kw, val)
 
+        if opts.update:
+            self.update_data()
 
-T2 = Dataset(**datasetsD['T2'])
-SST = Dataset(**datasetsD['SST'])
-SST_old = Dataset(**datasetsD['SST_old'])
+        self.get_data()
+
+        cdf = self.data
+        onedf = DataFrame(cdf[f'{self.yearL[0]}'].to_list())
+        for _year in self.yearL[1:]:
+            df1 = DataFrame(cdf[f'{_year}'].to_list())
+            onedf = concat([onedf, df1]).reset_index(drop=True)
+        self.onedf = onedf
+
+        self.tmin = int(self.first_year)
+        self.tmax = int(self.last_year)+1
+
+    def _handle_preliminary(self, df):
+        last_year = df.index.to_list()[self.end_offset]
+        if last_year == 'Preliminary':
+            prelim_data = df.loc[last_year]
+            df = df.drop(labels=last_year, axis=0, inplace=False)
+            last_year = df.index.to_list()[self.end_offset]
+            # add prelim to last year
+            if opts.prelim:
+                print('adding preliminary data...')
+                prelim_data = prelim_data[notna(prelim_data)]
+                updates = prelim_data.index.to_list()
+                df.loc[last_year, updates] = prelim_data.to_list()
+
+        return df, last_year
+
+    def update_data(self):
+        print(f'Updating {self.name} ... ', end='')
+        path = f"{self.URL}/{self.fileN}"
+        df = read_json(path_or_buf=path)
+        df.set_index("name", inplace=True)
+        df = DataFrame(df["data"].to_list(), columns=list(range(1, 367)), index=df.index)
+        df.to_excel(f'{self.name}_raw_data.xlsx')
+        print('done.')
+
+    def get_data(self):
+        df = read_excel(f'{self.name}_raw_data.xlsx')
+        df.set_index('name', inplace=True, drop=True)
+        df, self.last_year = self._handle_preliminary(df)
+        self.first_year = df.index.to_list()[0]
+        self.day_of_year = df.loc[self.last_year, :].dropna().index.to_list()[-1]
+        self.last_date = (datetime.datetime(int(self.last_year), 1, 1)
+                          + datetime.timedelta(self.day_of_year - 1)).strftime('%m/%d/%Y')
+        self.yearL = range(int(self.first_year), int(self.last_year)+1)
+        self.end_data_period = df.index.to_list()[self.end_offset+1:]
+        self.mean_baseL = df.index.to_list()[self.mean_base].split('-')
+
+        print(f'{self.day_of_year=}')
+        print(f'latest data point is {self.last_date}')
+        print(f'last year = {self.last_year}')
+        print(f'first year = {self.first_year}')
+
+        # # compute mean and standard deviations and display raw data
+        cdf = df.T.loc[:, self.first_year:]
+        cdf['mean'] = cdf.loc[:, self.mean_baseL[0]:self.mean_baseL[1]].mean(axis=1, skipna=True)
+        cdf['std'] = cdf.loc[:, self.mean_baseL[0]:self.mean_baseL[1]].std(axis=1, skipna=True)
+        cdf['finalmean'] = cdf.loc[:, '2011':self.last_year].mean(axis=1, skipna=True)
+        cdf['finalstd'] = cdf.loc[:, '2011':self.last_year].std(axis=1, skipna=True)
+        cdf['mean+5std'] = cdf['mean']+5*cdf['std']
+        cdf['mean+5finalstd'] = cdf['mean']+5*cdf['finalstd']
+        cdf['mean+2std'] = cdf['mean']+2*cdf['std']
+        cdf['mean-2std'] = cdf['mean']-2*cdf['std']
+        self.data = cdf
+
 
 markersL = ('1', '2', '3', '4', '+', 'x', '.', 'o', 'v', '<', '>',
             '8', 's', 'p', '*', 'h', 'H', 'd', 'D', 'P', 'X',
             4, 5, 6, 7, 8, 9, 10, 11)
 
-num_figs_per_ds = 6
-
 # # get the latest data
 # # gridded data https://www.ncei.noaa.gov/data/sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/
-
-
-def update_data(ds):
-    path = f"{ds.URL}/{ds.fileN}"
-    df = read_json(path_or_buf=path)
-    df.set_index("name", inplace=True)
-    df = DataFrame(df["data"].to_list(), columns=list(range(1, 367)), index=df.index)
-    df.to_excel(f'{ds.name}_raw_data.xlsx')
-
-
-def get_data(ds):
-    df = read_excel(f'{ds.name}_raw_data.xlsx')
-    df.set_index('name', inplace=True, drop=True)
-    ds.last_year = df.index.to_list()[ds.end_offset]
-    ds.first_year = df.index.to_list()[0]
-    ds.day_of_year = df.loc[ds.last_year, :].dropna().index.to_list()[-1]
-    ds.last_date = (datetime.datetime(int(ds.last_year), 1, 1) + datetime.timedelta(ds.day_of_year - 1)).strftime('%m/%d/%Y')
-    ds.yearL = range(int(ds.first_year), int(ds.last_year)+1)
-    ds.end_data_period = df.index.to_list()[ds.end_offset+1:]
-    ds.mean_baseL = df.index.to_list()[ds.mean_base].split('-')
-
-    print(f'{ds.day_of_year=}')
-    print(f'latest data point is {ds.last_date}')
-    print(f'last year = {ds.last_year}')
-    print(f'first year = {ds.first_year}')
-
-    # # compute mean and standard deviations and display raw data
-    cdf = df.T.loc[:, ds.first_year:]
-    cdf['mean'] = cdf.loc[:, ds.mean_baseL[0]:ds.mean_baseL[1]].mean(axis=1, skipna=True)
-    cdf['std'] = cdf.loc[:, ds.mean_baseL[0]:ds.mean_baseL[1]].std(axis=1, skipna=True)
-    cdf['finalmean'] = cdf.loc[:, '2011':ds.last_year].mean(axis=1, skipna=True)
-    cdf['finalstd'] = cdf.loc[:, '2011':ds.last_year].std(axis=1, skipna=True)
-    cdf['mean+5std'] = cdf['mean']+5*cdf['std']
-    cdf['mean+5finalstd'] = cdf['mean']+5*cdf['finalstd']
-    cdf['mean+2std'] = cdf['mean']+2*cdf['std']
-    cdf['mean-2std'] = cdf['mean']-2*cdf['std']
-    ds.data = cdf
 
 
 def display_latest_year_data(ds):
@@ -140,7 +179,7 @@ def display_latest_year_data(ds):
     plt.xlim([0, ds.day_of_year])
     plt.xlabel('day_of_year')
     plt.ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
-    plt.title(f'latest year of data = {ds.last_year}')
+    plt.title(f'{ds.name} latest year of data = {ds.last_year}')
     plt.savefig(f'{ds.name}_last_year.png')
 
 
@@ -159,7 +198,7 @@ def _display_color_chart(cmaps, cmap_types):
 
     ncols = len(cmap_types)
     nrows = max([len(arr) for arr in cmaps.values()])
-    cbarfig, axsL = plt.subplots(nrows=nrows, ncols=ncols, sharey=True, sharex=True, figsize=(16, 16), num=20, clear=True)
+    cbarfig, axsL = plt.subplots(nrows=nrows, ncols=ncols, sharey=True, sharex=True, figsize=(16, 16), num=7, clear=True)
     cbarfig.subplots_adjust(hspace=0.35, wspace=0.05)
 
     for axrow in axsL:
@@ -180,7 +219,7 @@ def _display_color_chart(cmaps, cmap_types):
             ax.set_yticks([])
 
 
-def construct_colormap(show_chart=False):
+def construct_colormap():
 
     cmaps = {'Cyclic': ['twilight', 'twilight_shifted', 'hsv'],
              'Perceptually Uniform Seq': ['viridis', 'plasma', 'inferno', 'magma', 'cividis'],
@@ -203,7 +242,7 @@ def construct_colormap(show_chart=False):
     cmap_types = list(cmaps.keys())
     cmap_names = [cname for ctype in cmap_types for cname in cmaps[ctype]]
 
-    if show_chart:
+    if opts.colorchart:
         _display_color_chart(cmaps, cmap_types)
 
     w = widgets.Dropdown(
@@ -216,10 +255,10 @@ def construct_colormap(show_chart=False):
 
 
 def display_main_plot(ds, w):
-    global PICK, CID
-    SHOWSIG = True
-    ACCENTS = True
-    PICK = False
+    global CID
+    SHOWSIG = not opts.nosigma
+    ACCENTS = not opts.noaccents
+    PICK = opts.pick
     if (not PICK) and CID:
         print('disconnecting')
         CID.disconnect()
@@ -228,6 +267,7 @@ def display_main_plot(ds, w):
         x = event.mouseevent.xdata
         y = event.mouseevent.ydata
         ax.text(x, y, event.artist.get_label())
+        plt.gcf().canvas.draw_idle()
 
     cmapStr = w.value
 
@@ -299,7 +339,7 @@ def display_main_plot(ds, w):
 
 # # SST/T2 jumps
 def display_jumps(ds, w):
-    SHOWSIG = True
+    SHOWSIG = not opts.nosigma
 
     cdf = ds.data
 
@@ -309,11 +349,15 @@ def display_jumps(ds, w):
     else:
         fig, ax = plt.subplots(1, 1, figsize=(16, 16), num=3, clear=True)
 
-    ax.plot(cdf.index, cdf['mean'], 'b', lw=4, label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean')
-    ax.plot(cdf.index, cdf['mean+2std'], 'k', lw=4, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean $\pm 2\sigma$')
+    ax.plot(cdf.index, cdf['mean'], 'b', lw=4,
+            label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean')
+    ax.plot(cdf.index, cdf['mean+2std'], 'k', lw=4,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean $\pm 2\sigma$')
     ax.plot(cdf.index, cdf['mean-2std'], 'k', lw=4)
-    ax.plot(cdf.index, cdf['mean+5std'], 'r', lw=4, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$5\sigma$')
-    ax.plot(cdf.index, cdf['mean+5finalstd'], 'g', lw=4, label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]}'r' mean +$5\sigma_{final}$')
+    ax.plot(cdf.index, cdf['mean+5std'], 'r', lw=4,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$5\sigma$')
+    ax.plot(cdf.index, cdf['mean+5finalstd'], 'g', lw=4,
+            label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]}'r' mean +$5\sigma_{final}$')
 
     num_colors = len(ds.yearL)
     cmap = plt.get_cmap(w.value, num_colors)
@@ -378,48 +422,45 @@ class LegendHandler:
                 self.ax.text(bbox.x0, bbox.y0-(i+1)*voff, textStr, fontsize='medium')
 
 
-def display_as_one_curve(ds, w, rolling_only=False):
-    if not rolling_only:
-        fig_all_T, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=4)
-    else:
-        fig_all_T, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=5)
-    num_colors = len(ds.yearL)
-    cmap = plt.get_cmap(w.value, num_colors)
-    cdf = ds.data
-
-    if not rolling_only:
-        for i, _year in enumerate(ds.yearL):
-            if i == 0:
-                label = f'daily {ds.name} data'
-            else:
-                label = None
-            ax_all_T.plot(array(cdf.index.to_list())/365.+i+int(ds.first_year), cdf[f'{_year}'], '-', c=cmap(i), ms=1, lw=1, label=label)
-
-    onedf = DataFrame(cdf[f'{ds.yearL[0]}'].to_list())
-    for i, _year in enumerate(ds.yearL[1:]):
-        df1 = DataFrame(cdf[f'{_year}'].to_list())
-        onedf = concat([onedf, df1]).reset_index(drop=True)
-
-    center_window = False
+def add_rolling_data(ds, ax, ctr, clip=True):
+    onedf = ds.onedf
+    ymin = 10000
+    ymax = -10000
     for num_year_roll, _color in zip((1, 2, 3, 4), ('k', 'g', 'r', 'b')):
         window_length = num_year_roll*365
         min_periods = window_length-num_year_roll
         lab = f'rolling {num_year_roll}-year average'
-        ax_all_T.plot(array(onedf.index.to_list())/365.+int(ds.first_year),
-                      onedf[0].rolling(window=window_length,
-                                       center=center_window,
-                                       min_periods=min_periods).mean(),
-                      color=_color, ms=1, label=lab)
-    title = 'centered' if center_window else 'right_aligned'
+        t = array(onedf.index.to_list())/365.+int(ds.first_year)
+        temp = onedf[0].rolling(window=window_length, center=ctr, min_periods=min_periods).mean()
+        if clip:
+            ymin = min(ymin, temp.min())
+            ymax = max(ymax, temp.max())
+            ax.set_ylim(ymin, ymax)
+        ax.plot(t, temp, color=_color, ms=1, label=lab)
+
+
+def display_as_one_curve(ds, w, rolling_only=False):
+    if not rolling_only:
+        _, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=4)
+    else:
+        _, ax_all_T = plt.subplots(1, 1, figsize=(16, 14), clear=True, num=5)
+
+    onedf = ds.onedf
+    t = array(onedf.index.to_list())/365.+int(ds.first_year)
+    if not rolling_only:
+        label = f'daily {ds.name} data'
+        temp = onedf[0]
+        ax_all_T.scatter(t, temp, s=1, c=t, cmap=w.value, vmin=ds.tmin, vmax=ds.tmax, lw=1, label=label)
+
+    center_window = False
+    add_rolling_data(ds, ax_all_T, center_window, clip=False)
+
+    title = f'{ds.name} centered' if center_window else f'{ds.name} right_aligned'
     title = title + ' rolling window'
     plt.title(title)
     ax_all_T.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
-    plt.legend(numpoints=5)
+    ax_all_T.legend(numpoints=5, scatterpoints=10)
 
-    if not rolling_only:
-        cbar = plt.colorbar(ds.sm, ax=ax_all_T, ticks=linspace(int(ds.first_year), ds.yearL[-1], num_colors),
-                            boundaries=arange(int(ds.first_year)-.5, ds.yearL[-1]+1, 1))
-        cbar.ax.tick_params(labelsize=6)
     fN = f'{ds.name}-one-curve-rolling-only.png' if rolling_only else f'{ds.name}-one-curve.png'
     plt.savefig(fN)
 
@@ -430,7 +471,7 @@ def display_shifting_averages(ds):
     markerL = ('g>', 'k<', 'c^')
     cdf = ds.data
 
-    fig, ax = plt.subplots(1, 1, figsize=(16, 8), num=6, clear=True)
+    _, ax = plt.subplots(1, 1, figsize=(16, 8), num=6, clear=True)
 
     cdf['3'] = cdf.loc[:, '2001':'2020'].mean(axis=1, skipna=True)
     cdf['4'] = cdf.loc[:, '2011':'2025'].mean(axis=1, skipna=True)
@@ -452,38 +493,127 @@ def display_shifting_averages(ds):
     lw = 1
     sl = slice(0, len(cdf.index), 1)
     date = cdf.index[sl]
-    ax.plot(date, cdf['mean-2std'][sl], 'k-.', lw=lw, ms=ms, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean -$2\sigma$')
-    ax.plot(date, cdf['mean'][sl], 'b-.', lw=lw, ms=ms, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean')
-    ax.plot(date, cdf['mean+2std'][sl], 'k-.', lw=lw, ms=ms, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$2\sigma$')
-    ax.plot(date, cdf['mean+5std'][sl], 'r-.', lw=lw, ms=ms, label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$5\sigma$')
-    ax.plot(date, cdf['mean+5finalstd'][sl], 'g', lw=lw, ms=ms, label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} 'r'mean +$5\sigma_{final}$')
+    ax.plot(date, cdf['mean-2std'][sl], 'k-.', lw=lw, ms=ms,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean -$2\sigma$')
+    ax.plot(date, cdf['mean'][sl], 'b-.', lw=lw, ms=ms,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean')
+    ax.plot(date, cdf['mean+2std'][sl], 'k-.', lw=lw, ms=ms,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$2\sigma$')
+    ax.plot(date, cdf['mean+5std'][sl], 'r-.', lw=lw, ms=ms,
+            label=rf'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} mean +$5\sigma$')
+    ax.plot(date, cdf['mean+5finalstd'][sl], 'g', lw=lw, ms=ms,
+            label=f'{ds.mean_baseL[0]}-{ds.mean_baseL[1]} 'r'mean +$5\sigma_{final}$')
     ax.legend(numpoints=4, ncols=2)
     ax.set_xlim(0, 365)
     ax.set_title(ds.name)
     plt.savefig(f'{ds.name}-change-in-averages')
 
 
-def make_all_plots(ds):
-    get_data(ds)
-    w = construct_colormap(show_chart=True)
-    display_latest_year_data(ds)
-    display_main_plot(ds, w)
-    display_jumps(ds, w)
-    display_as_one_curve(ds, w)
-    display_as_one_curve(ds, w, rolling_only=True)
-    display_shifting_averages(ds)
-    plt.show(block=False)
-    input('Continue with any key: ')
-    for num in plt.get_fignums():
-        if num == 20:
-            continue
-        plt.figure(num).clear()
-        plt.close(num)
-        gc.collect()
-        plt.pause(0.5)
+def combined_plots(w):
+    # rolling data
+    fig, (ax1, ax2) = plt.subplots(2, 1, layout='constrained', sharex=True, figsize=(12.8, 6.4))
+
+    tmin = min(T2.tmin, SST.tmin)
+    tmax = max(T2.tmax, SST.tmax)
+
+    center_window = False
+
+    print(SST.onedf[0].isna().sum())
+    print(T2.onedf[0].isna().sum())
+
+    for ds, ax in zip(dsL, (ax1, ax2)):
+        onedf = ds.onedf
+        t = array(onedf.index.to_list())/365.+int(ds.first_year)
+        label = f'daily {ds.name} data'
+        temp = onedf[0]
+        mask = ~isnan(temp)
+        sc = ax.scatter(t[mask], temp[mask], s=.25, marker='o', c=t[mask], cmap=w.value,
+                        vmin=tmin, vmax=tmax, lw=1, label=label, ec=None)
+
+        ax.set_ylabel(r'$T\ \  (^{\circ} C)$', fontsize='xx-large')
+
+        add_rolling_data(ds, ax, center_window)
+        # ax.set_xlim(1985, 2025)
+        h, l = ax.get_legend_handles_labels()
+        ax.legend(h, l,  scatterpoints=5, ncol=2)
+
+    title = f'{T2.name}$|${SST.name} centered' if center_window else f'{T2.name}$|${SST.name} right_aligned'
+    title = title + ' rolling window'
+    fig.suptitle(title)
+
+    plt.savefig('combined_one_curve.png')
+    plt.show()
+
+
+def make_all_plots(comb_only=True):
+    w = construct_colormap()
+
+    combined_plots(w)
+    if comb_only:
+        return
+
+    for ds in dsL:
+        display_latest_year_data(ds)
+        display_main_plot(ds, w)
+        display_jumps(ds, w)
+        display_as_one_curve(ds, w)
+        display_as_one_curve(ds, w, rolling_only=True)
+        display_shifting_averages(ds)
+        plt.show(block=False)
+        input('Continue with any key: ')
+        for num in plt.get_fignums():
+            if num == 20:
+                continue
+            plt.figure(num).clear()
+            plt.close(num)
+            gc.collect()
+            plt.pause(0.5)
+
+
+def _scatter_example():
+    t = array([1, 2, 3, 4, 5, 6, 7, 8])
+    x = t
+
+    tt = array([5, 6, 7, 8])
+    xx = tt
+
+    tmin = 1
+    tmax = 8
+
+    tmin = min(t.min(), tt.min())
+    tmax = min(t.max(), tt.max())
+
+    sz = 5
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    ax1.scatter(t, x, s=sz,  c=t, marker='o', cmap='jet', vmin=tmin, vmax=tmax, lw=1, ec=None, label='long')
+    ax2.scatter(tt, xx, s=sz, c=tt, marker='o', cmap='jet', vmin=tmin, vmax=tmax, lw=1, ec=None, label='short')
+    ax1.legend(scatterpoints=5, ncol=2)
+    ax2.legend(scatterpoints=5, ncol=2)
+
+    plt.tight_layout()
+    fig.savefig('example.png')
+    plt.show()
+    exit(0)
 
 
 if __name__ == '__main__':
-    for _ds in (T2, SST):
-        update_data(_ds)
-        make_all_plots(_ds)
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('--colorchart', action='store_true', default=False, help='show color chart')
+    parser.add_argument('--update', action='store_true', default=False, help='update data')
+    parser.add_argument('--nosigma', action='store_true', default=False, help='do not display sigma')
+    parser.add_argument('--pick', action='store_true', default=False, help='pick years in graph')
+    parser.add_argument('--noaccents', action='store_true', default=False, help='do not accent years in graph')
+    parser.add_argument('--prelim', action='store_true', default=False, help='use prelim data')
+
+    opts = parser.parse_args()
+
+    # _scatter_example()
+
+    T2 = Dataset(**datasetsD['T2'])
+    SST = Dataset(**datasetsD['SST'])
+    dsL = (SST, T2)
+
+    # SST_old = Dataset(**datasetsD['SST_old'])
+
+    make_all_plots(comb_only=False)
